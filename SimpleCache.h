@@ -1,16 +1,15 @@
 #ifndef CACHE_SIMULATOR_H_
 #define CACHE_SIMULATOR_H_
 
+#include <stdint.h>
+
 #define DEBUG_CACHE_SIMULATOR
 
 #define INVALID_BLOCK (~(0UL))
 
 #define INVALID_SUB_BLOCK_DIS 65
 
-namespace BlSim
-{
-    typedef unsigned int uint32_t;
-    typedef unsigned long uint64_t;
+namespace BlSim {
 
     /*!
      *  @brief Computes floor(log2(n))
@@ -52,27 +51,22 @@ namespace BlSim
        Type m_type;
        };*/
 
-    class CacheBlock
-    {
+    class CacheBlock {
         public:
             uint32_t m_block_size; //it is usual 64B
             uint64_t m_block_addr; //it is full addr, do not filter for it
             uint64_t m_block_tag;  //filter the inner-set addr and the set index
-            uint32_t m_block_in_upper_cache;
-
-
-
-
             uint32_t m_dirty; //to mark if this block is written
-        public:
-            class CacheBlock* m_next_lru;
-            class CacheBlock* m_prev_lru;
-
-            //Add this to quick find its parent block in the lower level cache, Inclusive
-            class CacheBlock *m_parent_block_in_lower;
+            CacheBlock* m_next;
+            CacheBlock* m_prev;
 
         public:
-            CacheBlock(uint32_t block_size);
+            CacheBlock(uint32_t block_size) : m_block_size(block_size),
+                                              m_block_addr(INVALID_BLOCK),
+                                              m_block_tag(0),
+                                              m_next(NULL),
+                                              m_prev(NULL),
+                                              m_dirty(0) { }
 
             void Replaced(uint32_t block_addr);  //Note: this only for lru cache block
 
@@ -89,32 +83,39 @@ namespace BlSim
             int is_invalid_cache(){return m_block_addr == INVALID_BLOCK;}
     };
 
-    class CacheSet
-    {
-	int write_back_mem_trace;
+    class CacheSet {
+        int write_back_mem_trace;
 
-protected:
-            uint32_t m_way_count;  //the cache associaticity
-            class CacheBlock *m_p_mru_block;
-            class CacheBlock *m_p_lru_block;
+        protected:
+        uint32_t m_way_count;  //the cache associaticity
+        CacheBlock *m_p_mru_block;
+        CacheBlock *m_p_lru_block;
 
         public:
-            CacheSet(uint32_t way_count, uint32_t block_size);
-            ~CacheSet();
+        CacheSet(uint32_t way_count, uint32_t block_size);
+        ~CacheSet();
 
-            CacheBlock *find_block(uint64_t mem_tag); //if not in set, return NULL		
-            void hit_access(CacheBlock **p_block);
+        CacheBlock* FindBlockByTag(uint64_t mem_tag);
+        void hit_access(CacheBlock **p_block);
 
-            CacheBlock* evict_lru_block();
-            void write_back_evicted_lru_block(CacheBlock *evicted_lru_block);
-            void put_accessed_block_in_mru(CacheBlock *p_new_block);
+        CacheBlock* evict_lru_block();
+        void write_back_evicted_lru_block(CacheBlock *evicted_lru_block);
+        void put_accessed_block_in_mru(CacheBlock *p_new_block);
 
-            uint32_t load_new_block_in_LLC(uint64_t maddr, uint64_t mem_tag);
-            CacheBlock *get_mru_block(){return m_p_mru_block;}
-            CacheBlock *get_lru_block(){return m_p_lru_block;}
+        uint32_t load_new_block_in_LLC(uint64_t maddr, uint64_t mem_tag);
+        CacheBlock *get_mru_block(){return m_p_mru_block;}
+        CacheBlock *get_lru_block(){return m_p_lru_block;}
 
-            void print_cache_set();
+        void print_cache_set();
     };
+
+    struct CacheAddress {
+        uint64_t addr;
+        uint32_t index;
+        uint64_t tag;
+        CacheAddress(uint64_t maddr, uint32_t set_index, uint64_t mtag) :
+            addr(maddr), index(set_index), tag(mtag) {}
+    }
 
     class Caches
     {
@@ -126,51 +127,46 @@ protected:
             uint32_t m_cache_set_capacity; //the size of each set
             uint32_t m_cache_set_count; //the count of cache set at each level cache
 
-            uint32_t m_block_low_bits[MAX_CACHE_LEVEL];  //the real low addr, 
-            uint32_t m_set_index_bits[MAX_CACHE_LEVEL];  //the cache block bits
-            //uint32_t m_tag_bits[MAX_CACHE_LEVEL];
+            uint32_t m_block_low_bits;  //the real low addr, 
+            uint32_t m_set_index_bits;  //the cache block bits
 
-            uint32_t m_block_low_mask[MAX_CACHE_LEVEL];
-            uint32_t m_set_index_mask[MAX_CACHE_LEVEL];
-            //uint64_t m_tag_mask[MASK_CACHE_LEVEL];
+            uint32_t m_block_low_mask;
+            uint32_t m_set_index_mask;
 
             //some cache access statistics
-            uint64_t m_mem_reads[MAX_CACHE_LEVEL];
-            uint64_t m_mem_reads_hit[MAX_CACHE_LEVEL];
-            uint64_t m_mem_reads_miss[MAX_CACHE_LEVEL];
+            uint64_t m_mem_reads;
+            uint64_t m_mem_reads_hit;
+            uint64_t m_mem_reads_miss;
 
-            uint64_t m_mem_writes[MAX_CACHE_LEVEL];
-            uint64_t m_mem_writes_hit[MAX_CACHE_LEVEL];
-            uint64_t m_mem_writes_miss[MAX_CACHE_LEVEL];
+            uint64_t m_mem_writes;
+            uint64_t m_mem_writes_hit;
+            uint64_t m_mem_writes_miss;
             uint64_t m_hit_count;
-			uint64_t m_miss_count;
+            uint64_t m_miss_count;
             uint64_t m_total_count;
             uint32_t write_back_mem_trace ;
 
 
             int m_shared_LLC;  //whether the last level of cache is shared among cores, 1 for yes
 
-            char *m_cache_config_fname;
+            CacheSet **m_cache_sets;
 
-            CacheSet **m_cache_sets[MAX_CACHE_LEVEL];
-
-            void get_cache_addr_parts(uint64_t maddr, uint64_t *mem_tag,
-                                      uint32_t *set_index, uint32_t level);
+            CacheAddress GetCacheAddress(uint64_t maddr);
 
             CacheSet* access_cache_at_level(uint64_t maddr,
-                                            uint32_t level,
-                                            uint64_t *mtag,
-                                            bool* hit);
+                    uint32_t level,
+                    uint64_t *mtag,
+                    bool* hit);
 
             void cache_replaced(CacheSet *p_lower_set, CacheSet *p_upper_set,
-                                uint32_t lower_level, uint64_t upper_mtag,
-                                uint64_t maddr);
+                    uint32_t lower_level, uint64_t upper_mtag,
+                    uint64_t maddr);
 
         public:
-            Caches(char *cache_config_fname, unsigned int numCores);
+            Caches(unsigned int numCores);
             ~Caches();
 
-            bool access_cache(uint64_t maddr, uint32_t mem_rw);
+            bool Access(uint64_t maddr, uint32_t mem_rw);
 
             void print_cache_config();
             void output_mem_reqs_statistics();
